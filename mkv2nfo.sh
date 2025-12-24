@@ -268,9 +268,9 @@ else
                         }
                     }
                     
-                    # Special English conditions
+                    # Special conditions for various lang (before checking parentheses)
                     if (handled == 0) {
-                        if (toupper(lang) ~ /ENGLISH|ENG/) {
+                        if (toupper(lang) ~ /ENGLISH|ITALIAN|FRENCH|SPANISH/) {
                             if (toupper(title) ~ /(^|\s|\(|\[)SDH(\s|\)|\]|$)/) {
                                 result = result lang " (SDH), "
                                 handled = 1
@@ -285,24 +285,6 @@ else
                             }
                             else if (toupper(title) ~ /(^|\s|\(|\[)BRITISH(\s|\)|\]|$)/) {
                                 result = result lang " (British), "
-                                handled = 1
-                            }
-                        }
-                    }
-
-                    # Special Italian conditions
-                    if (handled == 0) {
-                        if (toupper(lang) ~ /ITALIAN|ITA/) {
-                            if (toupper(title) ~ /(^|\s|\(|\[)SDH(\s|\)|\]|$)/) {
-                                result = result lang " (SDH), "
-                                handled = 1
-                            }
-                            else if (toupper(title) ~ /(^|\s|\(|\[)CC(\s|\)|\]|$)/) {
-                                result = result lang " (CC), "
-                                handled = 1
-                            }
-                            else if (toupper(title) ~ /(^|\s|\(|\[)FORCED(\s|\)|\]|$)/) {
-                                result = result lang " (Forced), "
                                 handled = 1
                             }
                         }
