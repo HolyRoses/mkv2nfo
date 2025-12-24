@@ -1,0 +1,27 @@
+Usage: /usr/local/bin/mkv2nfo.sh <video_file> --title "Title" --source "SOURCE" --url "URL" [OPTIONS]
+
+Required arguments:
+    <video_file>            Path to the video file (MKV, MP4, AVI, M4V, etc.)
+    --title "Title"         Title of the release
+    --source "SOURCE"       Source (e.g., DISNEYPLUS, NETFLIX, WEB-DL)
+    --url "URL"             URL (e.g., tvmaze or imdb link)
+
+Optional arguments:
+    -h, --help              Display this help message and exit
+    --notes "Notes"         Additional notes (default: "none")
+    --release-date "DATE"   Release date in YYYY-MM-DD format (default: today)
+    --use-filename          Use the video filename as the release name (default: uses parent directory name)
+                            Example: /path/to/Release.Name/file.mkv
+                            Default: "Release.Name" is used as release name
+                            With --use-filename: "file" is used as release name
+    --keepcase              Keep original case for NFO filename (default: lowercase)
+
+Examples:
+    # Default behavior (uses directory name as release)
+    /usr/local/bin/mkv2nfo.sh /path/to/Release.Name.2024.1080p/video.mkv --title "Episode 1" --source "DISNEYPLUS" --url "https://example.com"
+    
+    # Works with any video format
+    /usr/local/bin/mkv2nfo.sh /path/to/Release.Name.2024.1080p/video.mp4 --title "Episode 1" --source "NETFLIX" --url "https://example.com"
+    
+    # Use filename as release instead
+    /usr/local/bin/mkv2nfo.sh /path/to/Release.Name.2024.1080p/video.mkv --title "Episode 1" --source "DISNEYPLUS" --url "https://example.com" --use-filename
