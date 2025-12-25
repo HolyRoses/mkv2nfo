@@ -2,26 +2,48 @@ Usage: /usr/local/bin/mkv2nfo.sh <video_file> --title "Title" --source "SOURCE" 
 
 Required arguments:
     <video_file>            Path to the video file (MKV, MP4, AVI, M4V, etc.)
-    --title "Title"         Title of the release
     --source "SOURCE"       Source (e.g., DISNEYPLUS, NETFLIX, WEB-DL)
+
+    AND either:
+    --title "Title"         Title of the release
     --url "URL"             URL (e.g., tvmaze or imdb link)
+
+    OR:
+    --imdb "tt1234567"      IMDB ID (will fetch title and construct URL automatically)
+
+    OR:
+    --tvmaze "49041"        TVMaze show ID (will auto-detect season/episode from release name)
 
 Optional arguments:
     -h, --help              Display this help message and exit
     --notes "Notes"         Additional notes (default: "none")
     --release-date "DATE"   Release date in YYYY-MM-DD format (default: today)
+    --omdb-api-key "KEY"    OMDb API key (can also be set via config or environment)
     --use-filename          Use the video filename as the release name (default: uses parent directory name)
                             Example: /path/to/Release.Name/file.mkv
                             Default: "Release.Name" is used as release name
                             With --use-filename: "file" is used as release name
     --keepcase              Keep original case for NFO filename (default: lowercase)
 
+Configuration:
+    Settings can be configured via:
+    1. Config file: ~/.mkv2nfo.conf or .mkv2nfo.conf in script directory
+    2. Environment variables: MKV2NFO_SOURCE, MKV2NFO_OMDB_API_KEY, etc.
+    3. Command-line flags (highest priority)
+
+    Example ~/.mkv2nfo.conf:
+    MKV2NFO_SOURCE="PRIMEVIDEO"
+    MKV2NFO_OMDB_API_KEY="your_api_key_here"
+    MKV2NFO_KEEPCASE=0
+    MKV2NFO_USE_FILENAME=0
+    MKV2NFO_NOTES="Encoded by Me"
+
 Examples:
-    # Default behavior (uses directory name as release)
+    # Using manual title and URL
     /usr/local/bin/mkv2nfo.sh /path/to/Release.Name.2024.1080p/video.mkv --title "Episode 1" --source "DISNEYPLUS" --url "https://example.com"
     
-    # Works with any video format
-    /usr/local/bin/mkv2nfo.sh /path/to/Release.Name.2024.1080p/video.mp4 --title "Episode 1" --source "NETFLIX" --url "https://example.com"
+    # Using IMDB ID (auto-fetches title and constructs URL)
+    /usr/local/bin/mkv2nfo.sh /path/to/Release.Name.2024.1080p/video.mkv --imdb "tt7766378" --source "NETFLIX"
     
-    # Use filename as release instead
-    /usr/local/bin/mkv2nfo.sh /path/to/Release.Name.2024.1080p/video.mkv --title "Episode 1" --source "DISNEYPLUS" --url "https://example.com" --use-filename
+    # Using TVMaze show ID (auto-detects S/E from release name)
+    /usr/local/bin/mkv2nfo.sh /path/to/ShowName.S02E02.1080p/video.mkv --tvmaze "49041" --source "PRIMEVIDEO"
