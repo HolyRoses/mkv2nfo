@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Function to display usage
 usage() {
@@ -7,29 +7,51 @@ Usage: $0 <video_file> --title "Title" --source "SOURCE" --url "URL" [OPTIONS]
 
 Required arguments:
     <video_file>            Path to the video file (MKV, MP4, AVI, M4V, etc.)
-    --title "Title"         Title of the release
     --source "SOURCE"       Source (e.g., DISNEYPLUS, NETFLIX, WEB-DL)
+
+    AND either:
+    --title "Title"         Title of the release
     --url "URL"             URL (e.g., tvmaze or imdb link)
+
+    OR:
+    --imdb "tt1234567"      IMDB ID (will fetch title and construct URL automatically)
+
+    OR:
+    --tvmaze "49041"        TVMaze show ID (will auto-detect season/episode from release name)
 
 Optional arguments:
     -h, --help              Display this help message and exit
     --notes "Notes"         Additional notes (default: "none")
     --release-date "DATE"   Release date in YYYY-MM-DD format (default: today)
+    --omdb-api-key "KEY"    OMDb API key (can also be set via config or environment)
     --use-filename          Use the video filename as the release name (default: uses parent directory name)
                             Example: /path/to/Release.Name/file.mkv
                             Default: "Release.Name" is used as release name
                             With --use-filename: "file" is used as release name
     --keepcase              Keep original case for NFO filename (default: lowercase)
 
+Configuration:
+    Settings can be configured via:
+    1. Config file: ~/.mkv2nfo.conf or .mkv2nfo.conf in script directory
+    2. Environment variables: MKV2NFO_SOURCE, MKV2NFO_OMDB_API_KEY, etc.
+    3. Command-line flags (highest priority)
+
+    Example ~/.mkv2nfo.conf:
+    MKV2NFO_SOURCE="PRIMEVIDEO"
+    MKV2NFO_OMDB_API_KEY="your_api_key_here"
+    MKV2NFO_KEEPCASE=0
+    MKV2NFO_USE_FILENAME=0
+    MKV2NFO_NOTES="Encoded by Me"
+
 Examples:
-    # Default behavior (uses directory name as release)
+    # Using manual title and URL
     $0 /path/to/Release.Name.2024.1080p/video.mkv --title "Episode 1" --source "DISNEYPLUS" --url "https://example.com"
     
-    # Works with any video format
-    $0 /path/to/Release.Name.2024.1080p/video.mp4 --title "Episode 1" --source "NETFLIX" --url "https://example.com"
+    # Using IMDB ID (auto-fetches title and constructs URL)
+    $0 /path/to/Release.Name.2024.1080p/video.mkv --imdb "tt7766378" --source "NETFLIX"
     
-    # Use filename as release instead
-    $0 /path/to/Release.Name.2024.1080p/video.mkv --title "Episode 1" --source "DISNEYPLUS" --url "https://example.com" --use-filename
+    # Using TVMaze show ID (auto-detects S/E from release name)
+    $0 /path/to/ShowName.S02E02.1080p/video.mkv --tvmaze "49041" --source "PRIMEVIDEO"
 EOF
     exit 1
 }
@@ -53,14 +75,27 @@ if [ ! -f "$VIDEO_FILE" ]; then
     exit 1
 fi
 
-# Initialize variables
+# Get script directory for config file lookup
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+
+# Source config file if it exists (prefer ~/.mkv2nfo.conf, fallback to script directory)
+if [ -f ~/.mkv2nfo.conf ]; then
+    source ~/.mkv2nfo.conf
+elif [ -f "${SCRIPT_DIR}/.mkv2nfo.conf" ]; then
+    source "${SCRIPT_DIR}/.mkv2nfo.conf"
+fi
+
+# Initialize variables with defaults from config/environment or built-in defaults
 TITLE=""
-SOURCE=""
+SOURCE="${MKV2NFO_SOURCE:-}"
 URL=""
-NOTES="none"
+IMDB_ID=""
+TVMAZE_ID=""
+NOTES="${MKV2NFO_NOTES:-none}"
+OMDB_API_KEY="${MKV2NFO_OMDB_API_KEY:-}"
 SUB_COUNT="0"
-USE_FILENAME=0
-KEEPCASE=0
+USE_FILENAME="${MKV2NFO_USE_FILENAME:-0}"
+KEEPCASE="${MKV2NFO_KEEPCASE:-0}"
 RELEASE_DATE=$(date +%Y-%m-%d)
 
 # Valid sources array
@@ -81,8 +116,20 @@ while [[ $# -gt 0 ]]; do
             URL="$2"
             shift 2
             ;;
+        --imdb)
+            IMDB_ID="$2"
+            shift 2
+            ;;
+        --tvmaze)
+            TVMAZE_ID="$2"
+            shift 2
+            ;;
         --notes)
             NOTES="$2"
+            shift 2
+            ;;
+        --omdb-api-key)
+            OMDB_API_KEY="$2"
             shift 2
             ;;
         --release-date)
@@ -105,8 +152,118 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Check mandatory fields
-if [ -z "$TITLE" ] || [ -z "$SOURCE" ] || [ -z "$URL" ]; then
-    echo "Error: --title, --source, and --url are mandatory"
+if [ -z "$SOURCE" ]; then
+    echo "Error: --source is mandatory"
+    echo ""
+    usage
+fi
+
+# Get the directory where the video file is located (needed for TVMaze season/episode detection)
+VIDEO_DIR=$(dirname "$VIDEO_FILE")
+
+# Extract video filename without extension (for NFO filename)
+# This handles any extension by removing everything after the last dot
+VIDEO_BASENAME=$(basename "$VIDEO_FILE")
+VIDEO_BASENAME="${VIDEO_BASENAME%.*}"
+
+# Check if either IMDB, TVMAZE, or (TITLE and URL) are provided
+if [ -n "$IMDB_ID" ]; then
+    # IMDB mode - fetch title and construct URL
+    # Check if API key is available
+    if [ -z "$OMDB_API_KEY" ]; then
+        echo "Error: OMDb API key not found"
+        echo "Please set it via:"
+        echo "  1. Config file: ~/.mkv2nfo.conf or .mkv2nfo.conf in script directory"
+        echo "  2. Environment variable: MKV2NFO_OMDB_API_KEY"
+        echo "  3. Command-line flag: --omdb-api-key KEY"
+        exit 1
+    fi
+
+    # Fetch data from OMDb API
+    echo "Fetching data from OMDb API for $IMDB_ID..."
+    OMDB_RESPONSE=$(curl -s "https://www.omdbapi.com/?i=${IMDB_ID}&apikey=${OMDB_API_KEY}")
+
+    # Check if jq is available
+    if ! command -v jq &> /dev/null; then
+        echo "Error: jq is required for JSON parsing but not found"
+        echo "Please install jq: sudo apt-get install jq"
+        exit 1
+    fi
+
+    # Check if API call was successful
+    RESPONSE_STATUS=$(echo "$OMDB_RESPONSE" | jq -r '.Response')
+    if [ "$RESPONSE_STATUS" = "False" ]; then
+        ERROR_MSG=$(echo "$OMDB_RESPONSE" | jq -r '.Error')
+        echo "Error: OMDb API returned an error: $ERROR_MSG"
+        exit 1
+    fi
+
+    # Extract title from JSON response
+    TITLE=$(echo "$OMDB_RESPONSE" | jq -r '.Title')
+
+    if [ -z "$TITLE" ] || [ "$TITLE" = "null" ]; then
+        echo "Error: Could not extract title from OMDb API response"
+        exit 1
+    fi
+
+    # Construct IMDB URL
+    URL="https://www.imdb.com/title/${IMDB_ID}/"
+
+    echo "Found: $TITLE"
+elif [ -n "$TVMAZE_ID" ]; then
+    # TVMaze mode - auto-detect season/episode from release name and fetch title
+    # Check if jq is available
+    if ! command -v jq &> /dev/null; then
+        echo "Error: jq is required for JSON parsing but not found"
+        echo "Please install jq: sudo apt-get install jq"
+        exit 1
+    fi
+
+    # Extract season and episode from RELEASE_NAME (which will be set later)
+    # For now, we need to determine it from the directory/filename
+    TEMP_RELEASE=$(basename "$VIDEO_DIR")
+
+    # Try to extract SxxExx or SxEx pattern
+    if [[ "$TEMP_RELEASE" =~ [Ss]([0-9]+)[Ee]([0-9]+) ]]; then
+        SEASON="${BASH_REMATCH[1]}"
+        EPISODE="${BASH_REMATCH[2]}"
+        # Remove leading zeros for API call
+        SEASON=$((10#$SEASON))
+        EPISODE=$((10#$EPISODE))
+    else
+        echo "Error: Could not detect season/episode from release name: $TEMP_RELEASE"
+        echo "Expected format: S##E## (e.g., S02E03)"
+        exit 1
+    fi
+
+    echo "Detected: Season $SEASON, Episode $EPISODE"
+    echo "Fetching data from TVMaze API for show $TVMAZE_ID..."
+
+    # Fetch episode data from TVMaze API
+    TVMAZE_RESPONSE=$(curl -s "https://api.tvmaze.com/shows/${TVMAZE_ID}/episodebynumber?season=${SEASON}&number=${EPISODE}")
+
+    # Check if API call returned valid data
+    if echo "$TVMAZE_RESPONSE" | jq -e '.name' > /dev/null 2>&1; then
+        TITLE=$(echo "$TVMAZE_RESPONSE" | jq -r '.name')
+        EPISODE_URL=$(echo "$TVMAZE_RESPONSE" | jq -r '.url')
+
+        if [ -z "$TITLE" ] || [ "$TITLE" = "null" ]; then
+            echo "Error: Could not extract title from TVMaze API response"
+            exit 1
+        fi
+
+        SHOW_NAME=$(echo "$TVMAZE_RESPONSE" | jq -r '._links.show.name')
+        SHOW_SLUG=$(echo "$SHOW_NAME" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+        URL="https://www.tvmaze.com/shows/${TVMAZE_ID}/${SHOW_SLUG}"
+
+        echo "Found: $TITLE (S${SEASON}E${EPISODE})"
+    else
+        echo "Error: TVMaze API did not return valid episode data"
+        echo "Response: $TVMAZE_RESPONSE"
+        exit 1
+    fi
+elif [ -z "$TITLE" ] || [ -z "$URL" ]; then
+    echo "Error: Either --imdb, --tvmaze, OR both --title and --url are required"
     echo ""
     usage
 fi
@@ -129,10 +286,12 @@ if [ $VALID_SOURCE -eq 0 ]; then
 fi
 
 # Get the directory where the video file is located
+# (Already set above for TVMaze, but keep assignment for clarity)
 VIDEO_DIR=$(dirname "$VIDEO_FILE")
 
 # Extract video filename without extension (for NFO filename)
 # This handles any extension by removing everything after the last dot
+# (Already set above for TVMaze, but keep assignment for clarity)
 VIDEO_BASENAME=$(basename "$VIDEO_FILE")
 VIDEO_BASENAME="${VIDEO_BASENAME%.*}"
 
@@ -148,7 +307,7 @@ if [ $USE_FILENAME -eq 1 ]; then
     # Use the video filename (without extension) as release name
     RELEASE_NAME="$VIDEO_BASENAME"
 else
-    # Use the parent directory name as release name (default, matches GRACE/ETHEL)
+    # Use the parent directory name as release name
     RELEASE_NAME=$(basename "$VIDEO_DIR")
 fi
 
