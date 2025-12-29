@@ -19,6 +19,7 @@ Optional arguments:
     --notes "Notes"         Additional notes (default: "none")
     --release-date "DATE"   Release date in YYYY-MM-DD format (default: today)
     --omdb-api-key "KEY"    OMDb API key (can also be set via config or environment)
+    --auto-source           Auto-detect source from release name
     --use-filename          Use the video filename as the release name (default: uses parent directory name)
                             Example: /path/to/Release.Name/file.mkv
                             Default: "Release.Name" is used as release name
@@ -36,6 +37,7 @@ Configuration:
     MKV2NFO_OMDB_API_KEY="your_api_key_here"
     MKV2NFO_KEEPCASE=0
     MKV2NFO_USE_FILENAME=0
+    MKV2NFO_AUTO_SOURCE=0
     MKV2NFO_NOTES="Encoded by Me"
 
 Examples:
