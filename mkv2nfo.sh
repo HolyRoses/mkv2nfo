@@ -25,6 +25,8 @@ Optional arguments:
     --release-date "DATE"   Release date in YYYY-MM-DD format (default: today)
     --omdb-api-key "KEY"    OMDb API key (can also be set via config or environment)
     --auto-source           Auto-detect source from release name
+    --auto-imdb             Auto-detect imdb title from release name
+    --auto-tvmaze           Auto-detect tvmaze id from release name
     --use-filename          Use the video filename as the release name (default: uses parent directory name)
                             Example: /path/to/Release.Name/file.mkv
                             Default: "Release.Name" is used as release name
@@ -44,6 +46,8 @@ Configuration:
     MKV2NFO_USE_FILENAME=0
     MKV2NFO_AUTO_SOURCE=0
     MKV2NFO_NOTES="Encoded by Me"
+    MKV2NFO_AUTO_IMDB=1
+    MKV2NFO_AUTO_TVMAZE=1
 
 Examples:
     # Using manual title and URL
@@ -99,6 +103,8 @@ SUB_COUNT="0"
 USE_FILENAME="${MKV2NFO_USE_FILENAME:-0}"
 KEEPCASE="${MKV2NFO_KEEPCASE:-0}"
 AUTO_SOURCE="${MKV2NFO_AUTO_SOURCE:-0}"
+AUTO_IMDB="${MKV2NFO_AUTO_IMDB:-0}"
+AUTO_TVMAZE="${MKV2NFO_AUTO_TVMAZE:-0}"
 RELEASE_DATE=$(date +%Y-%m-%d)
 
 # Store config SOURCE as fallback (don't use it yet)
@@ -152,6 +158,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --auto-source)
             AUTO_SOURCE=1
+            shift
+            ;;
+        --auto-imdb)
+            AUTO_IMDB=1
+            shift
+            ;;
+        --auto-tvmaze)
+            AUTO_TVMAZE=1
             shift
             ;;
         *)
@@ -227,7 +241,55 @@ if [ -z "$SOURCE" ]; then
     fi
 fi
 
-# Check if either IMDB, TVMAZE, or (TITLE and URL) are provided
+# AUTO-TVMAZE mode - run this BEFORE checking existing TVMAZE_ID
+if [ "$AUTO_TVMAZE" -eq 1 ] && [ -z "$TVMAZE_ID" ] && [ -z "$IMDB_ID" ]; then
+    if ! command -v jq &> /dev/null; then
+        echo "Error: jq is required for --auto-tvmaze"
+        exit 1
+    fi
+
+    # Determine release name source
+    if [ "$USE_FILENAME" -eq 1 ]; then
+        RAW_RELEASE="$VIDEO_BASENAME"
+    else
+        RAW_RELEASE=$(basename "$VIDEO_DIR")
+    fi
+
+    # Normalize
+    RELEASE_NORM=$(echo "$RAW_RELEASE" | tr ' ' '.' | tr '[:lower:]' '[:upper:]')
+
+    # Require episodic pattern
+    if ! echo "$RELEASE_NORM" | grep -Eq '\.S[0-9]{1,2}E[0-9]{1,2}\.'; then
+        echo "AUTO-TVMAZE: Not an episodic release, skipping"
+    else
+        # Strip episode info and junk
+        RELEASE_CLEAN=$(echo "$RELEASE_NORM" | sed -E '
+            s/\.S[0-9]{1,2}E[0-9]{1,2}.*//
+            s/\.(2160P|1080P|720P|480P)\././g
+            s/\.(X264|X265|H264|H265|HEVC|AVC)\././g
+            s/\.(WEB[-.]DL|WEB|BLURAY|HDR|HDR10|DV|DOLBYVISION)\././g
+            s/\.(DDP?[0-9.]+|AAC|TRUEHD|ATMOS)\././g
+            s/\.(PROPER|REPACK|INTERNAL)\././g
+            s/\.+/./g
+            s/^\.+|\.+$//g
+        ')
+
+        SHOW_QUERY=$(echo "$RELEASE_CLEAN" | tr '.' ' ')
+        echo "AUTO-TVMAZE: Searching TVMaze for \"$SHOW_QUERY\""
+
+        TVMAZE_SEARCH=$(curl -s "https://api.tvmaze.com/search/shows?q=$(echo "$SHOW_QUERY" | sed 's/ /%20/g')")
+
+        if echo "$TVMAZE_SEARCH" | jq -e '.[0].show.id' >/dev/null 2>&1; then
+            TVMAZE_ID=$(echo "$TVMAZE_SEARCH" | jq -r '.[0].show.id')
+            SHOW_NAME=$(echo "$TVMAZE_SEARCH" | jq -r '.[0].show.name')
+            echo "AUTO-TVMAZE: Matched \"$SHOW_NAME\" (ID: $TVMAZE_ID)"
+        else
+            echo "AUTO-TVMAZE: No TVMaze match found"
+        fi
+    fi
+fi
+
+# Now check if IMDB, TVMAZE (including auto-detected), or (TITLE and URL) are provided
 if [ -n "$IMDB_ID" ]; then
     # IMDB mode - fetch title and construct URL
     # Check if API key is available
@@ -271,6 +333,65 @@ if [ -n "$IMDB_ID" ]; then
     URL="https://www.imdb.com/title/${IMDB_ID}/"
 
     echo "Found: $TITLE"
+elif [ "$AUTO_IMDB" -eq 1 ] && [ -z "$IMDB_ID" ] && [ -z "$TVMAZE_ID" ]; then
+    # AUTO-IMDB mode
+
+    if [ -z "$OMDB_API_KEY" ]; then
+        echo "Error: OMDb API key not found (required for --auto-imdb)"
+        exit 1
+    fi
+
+    # Determine release name source
+    if [ "$USE_FILENAME" -eq 1 ]; then
+        RAW_RELEASE="$VIDEO_BASENAME"
+    else
+        RAW_RELEASE=$(basename "$VIDEO_DIR")
+    fi
+
+    # Normalize: spaces -> dots, uppercase
+    RELEASE_NORM=$(echo "$RAW_RELEASE" | tr ' ' '.' | tr '[:lower:]' '[:upper:]')
+
+    # Detect TV-style releases early (skip auto-imdb)
+    if echo "$RELEASE_NORM" | grep -Eq '\.S[0-9]{1,2}E[0-9]{1,2}\.'; then
+        echo "AUTO-IMDB: Detected episodic release, skipping IMDB auto-detection"
+    else
+        # Strip group (last -GROUP)
+        RELEASE_NORM="${RELEASE_NORM%-*}"
+
+        # Remove common junk tokens
+        RELEASE_CLEAN=$(echo "$RELEASE_NORM" | sed -E '
+            s/\.(2160P|1080P|720P|480P)\././g
+            s/\.(X264|X265|H264|H265|HEVC|AVC)\././g
+            s/\.(WEB[-.]DL|WEB|BLURAY|BDRIP|BRRIP|HDR|HDR10|DV|DOLBYVISION)\././g
+            s/\.(DDP?[0-9.]+|AAC|TRUEHD|ATMOS)\././g
+            s/\.(PROPER|REPACK|INTERNAL|EXTENDED)\././g
+            s/\.+/./g
+            s/^\.+|\.+$//g
+        ')
+
+        # Extract year if present
+        YEAR=$(echo "$RELEASE_CLEAN" | grep -oE '\.(19[0-9]{2}|20[0-9]{2})\.' | tr -d '.')
+
+        if [ -n "$YEAR" ]; then
+            TITLE_QUERY=$(echo "$RELEASE_CLEAN" | sed -E "s/\.$YEAR.*//" | tr '.' ' ')
+        else
+            TITLE_QUERY=$(echo "$RELEASE_CLEAN" | tr '.' ' ')
+        fi
+
+        echo "AUTO-IMDB: Searching IMDB for \"$TITLE_QUERY\" ${YEAR:+($YEAR)}"
+
+        OMDB_SEARCH=$(curl -s "https://www.omdbapi.com/?t=$(echo "$TITLE_QUERY" | sed 's/ /+/g')${YEAR:+&y=$YEAR}&apikey=${OMDB_API_KEY}")
+
+        if echo "$OMDB_SEARCH" | jq -e '.imdbID' >/dev/null 2>&1; then
+            IMDB_ID=$(echo "$OMDB_SEARCH" | jq -r '.imdbID')
+            TITLE=$(echo "$OMDB_SEARCH" | jq -r '.Title')
+            URL="https://www.imdb.com/title/${IMDB_ID}/"
+
+            echo "AUTO-IMDB: Matched $TITLE ($IMDB_ID)"
+        else
+            echo "AUTO-IMDB: No IMDB match found"
+        fi
+    fi
 elif [ -n "$TVMAZE_ID" ]; then
     # TVMaze mode - auto-detect season/episode from release name and fetch title
     # Check if jq is available

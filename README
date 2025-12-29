@@ -20,6 +20,8 @@ Optional arguments:
     --release-date "DATE"   Release date in YYYY-MM-DD format (default: today)
     --omdb-api-key "KEY"    OMDb API key (can also be set via config or environment)
     --auto-source           Auto-detect source from release name
+    --auto-imdb             Auto-detect imdb title from release name
+    --auto-tvmaze           Auto-detect tvmaze id from release name
     --use-filename          Use the video filename as the release name (default: uses parent directory name)
                             Example: /path/to/Release.Name/file.mkv
                             Default: "Release.Name" is used as release name
@@ -39,6 +41,8 @@ Configuration:
     MKV2NFO_USE_FILENAME=0
     MKV2NFO_AUTO_SOURCE=0
     MKV2NFO_NOTES="Encoded by Me"
+    MKV2NFO_AUTO_IMDB=1
+    MKV2NFO_AUTO_TVMAZE=1
 
 Examples:
     # Using manual title and URL
