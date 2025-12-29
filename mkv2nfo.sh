@@ -24,6 +24,7 @@ Optional arguments:
     --notes "Notes"         Additional notes (default: "none")
     --release-date "DATE"   Release date in YYYY-MM-DD format (default: today)
     --omdb-api-key "KEY"    OMDb API key (can also be set via config or environment)
+    --auto-source           Auto-detect source from release name
     --use-filename          Use the video filename as the release name (default: uses parent directory name)
                             Example: /path/to/Release.Name/file.mkv
                             Default: "Release.Name" is used as release name
@@ -41,6 +42,7 @@ Configuration:
     MKV2NFO_OMDB_API_KEY="your_api_key_here"
     MKV2NFO_KEEPCASE=0
     MKV2NFO_USE_FILENAME=0
+    MKV2NFO_AUTO_SOURCE=0
     MKV2NFO_NOTES="Encoded by Me"
 
 Examples:
@@ -87,7 +89,7 @@ fi
 
 # Initialize variables with defaults from config/environment or built-in defaults
 TITLE=""
-SOURCE="${MKV2NFO_SOURCE:-}"
+SOURCE=""
 URL=""
 IMDB_ID=""
 TVMAZE_ID=""
@@ -96,7 +98,11 @@ OMDB_API_KEY="${MKV2NFO_OMDB_API_KEY:-}"
 SUB_COUNT="0"
 USE_FILENAME="${MKV2NFO_USE_FILENAME:-0}"
 KEEPCASE="${MKV2NFO_KEEPCASE:-0}"
+AUTO_SOURCE="${MKV2NFO_AUTO_SOURCE:-0}"
 RELEASE_DATE=$(date +%Y-%m-%d)
+
+# Store config SOURCE as fallback (don't use it yet)
+FALLBACK_SOURCE="${MKV2NFO_SOURCE:-}"
 
 # Valid sources array
 VALID_SOURCES=("AMAZON" "APPLE" "BluRay" "DISNEYPLUS" "DVD" "HBOMAX" "HULU" "ITUNES" "MOVIESANYWHERE" "NETFLIX" "PEACOCKTV" "PRIMEVIDEO" "WEB" "WEB-DL")
@@ -144,6 +150,10 @@ while [[ $# -gt 0 ]]; do
             KEEPCASE=1
             shift
             ;;
+        --auto-source)
+            AUTO_SOURCE=1
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
             usage
@@ -151,20 +161,71 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Check mandatory fields
-if [ -z "$SOURCE" ]; then
-    echo "Error: --source is mandatory"
-    echo ""
-    usage
-fi
-
-# Get the directory where the video file is located (needed for TVMaze season/episode detection)
-VIDEO_DIR=$(dirname "$VIDEO_FILE")
+# Get the directory where the video file is located (needed early for auto-source detection)
+VIDEO_DIR=$(dirname "$(readlink -f "$VIDEO_FILE")")
 
 # Extract video filename without extension (for NFO filename)
-# This handles any extension by removing everything after the last dot
 VIDEO_BASENAME=$(basename "$VIDEO_FILE")
 VIDEO_BASENAME="${VIDEO_BASENAME%.*}"
+
+# Check mandatory fields
+# Priority: 1. --source flag, 2. Auto-detect, 3. Fallback to MKV2NFO_SOURCE
+if [ -z "$SOURCE" ]; then
+    if [ "$AUTO_SOURCE" -eq 1 ]; then
+        # Auto-detect source from release name
+        TEMP_RELEASE=$(basename "$VIDEO_DIR")
+
+        # Convert spaces to dots, then convert to uppercase for matching
+        TEMP_RELEASE_UPPER=$(echo "$TEMP_RELEASE" | tr ' ' '.' | tr '[:lower:]' '[:upper:]')
+
+        # Try to match source patterns (order matters - check specific sources first, WEB/WEB-DL last)
+        if [[ "$TEMP_RELEASE_UPPER" =~ \.(AMZN|AMAZON)\. ]]; then
+            SOURCE="AMAZON"
+        elif [[ "$TEMP_RELEASE_UPPER" =~ \.(NF|NFLX|NETFLIX)\. ]]; then
+            SOURCE="NETFLIX"
+        elif [[ "$TEMP_RELEASE_UPPER" =~ \.(DSNP|DISNEYPLUS)\. ]]; then
+            SOURCE="DISNEYPLUS"
+        elif [[ "$TEMP_RELEASE_UPPER" =~ \.HULU\. ]]; then
+            SOURCE="HULU"
+        elif [[ "$TEMP_RELEASE_UPPER" =~ \.(IT|ITUNES)\. ]]; then
+            SOURCE="ITUNES"
+        elif [[ "$TEMP_RELEASE_UPPER" =~ \.(PCOK|PEACOCK)\. ]]; then
+            SOURCE="PEACOCKTV"
+        elif [[ "$TEMP_RELEASE_UPPER" =~ \.(ATVP|ATV|APPLE)\. ]]; then
+            SOURCE="APPLE"
+        elif [[ "$TEMP_RELEASE_UPPER" =~ \.(HMAX|HBO)\. ]]; then
+            SOURCE="HBOMAX"
+        elif [[ "$TEMP_RELEASE_UPPER" =~ \.(MA|MOVIESANYWHERE)\. ]]; then
+            SOURCE="MOVIESANYWHERE"
+        elif [[ "$TEMP_RELEASE_UPPER" =~ \.(BLURAY|BDRIP|BRRIP)\. ]]; then
+            SOURCE="BluRay"
+        elif [[ "$TEMP_RELEASE_UPPER" =~ \.(DVD|DVDRIP)\. ]]; then
+            SOURCE="DVD"
+        elif [[ "$TEMP_RELEASE_UPPER" =~ \.(WEB-DL|WEB)\. ]]; then
+            SOURCE="WEB-DL"
+        fi
+
+        # If auto-detect found something, announce it
+        if [ -n "$SOURCE" ]; then
+            echo "Auto-detected source: $SOURCE"
+        # If auto-detect failed, try fallback
+        elif [ -n "$FALLBACK_SOURCE" ]; then
+            SOURCE="$FALLBACK_SOURCE"
+            echo "Using fallback source from config: $SOURCE"
+        else
+            echo "Error: Could not auto-detect source from release name: $TEMP_RELEASE"
+            echo "Please specify source manually with --source or set MKV2NFO_SOURCE in config"
+            exit 1
+        fi
+    elif [ -n "$FALLBACK_SOURCE" ]; then
+        # Not using auto-source, use fallback from config
+        SOURCE="$FALLBACK_SOURCE"
+    else
+        echo "Error: --source is mandatory (or use --auto-source to detect automatically)"
+        echo ""
+        usage
+    fi
+fi
 
 # Check if either IMDB, TVMAZE, or (TITLE and URL) are provided
 if [ -n "$IMDB_ID" ]; then
@@ -284,16 +345,6 @@ if [ $VALID_SOURCE -eq 0 ]; then
     printf '  %s\n' "${VALID_SOURCES[@]}"
     exit 1
 fi
-
-# Get the directory where the video file is located
-# (Already set above for TVMaze, but keep assignment for clarity)
-VIDEO_DIR=$(dirname "$VIDEO_FILE")
-
-# Extract video filename without extension (for NFO filename)
-# This handles any extension by removing everything after the last dot
-# (Already set above for TVMaze, but keep assignment for clarity)
-VIDEO_BASENAME=$(basename "$VIDEO_FILE")
-VIDEO_BASENAME="${VIDEO_BASENAME%.*}"
 
 # Apply lowercase to NFO filename unless --keepcase is specified
 if [ $KEEPCASE -eq 1 ]; then
